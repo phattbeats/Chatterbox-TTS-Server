@@ -205,7 +205,10 @@ VERSION_PATTERN = re.compile(
 # Pattern to find potential sentence endings (punctuation followed by quote/space/end of string).
 POTENTIAL_END_PATTERN = re.compile(r'([.!?])(["\']?)(\s+|$)')
 # Pattern to detect start-of-line bullet points or numbered lists.
-BULLET_POINT_PATTERN = re.compile(r"(?:^|\n)\s*([-•*]|\d+\.)\s+")
+# Requires a space/tab (not a newline) after the bullet char so that stray
+# dashes left over in narrative text (e.g. "-\n\nNext paragraph...") do
+# not get treated as a single huge bullet item. See issue #144.
+BULLET_POINT_PATTERN = re.compile(r"(?:^|\n)[ \t]*([-•*]|\d+\.)[ \t]+")
 # Placeholder for non-verbal cues or special instructions within text (e.g., (laughs), (sighs)).
 NON_VERBAL_CUE_PATTERN = re.compile(r"(\([\w\s'-]+\))")
 

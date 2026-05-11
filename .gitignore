@@ -46,3 +46,6 @@ htmlcov/
 
 # Ignore log files
 *.log
+
+# Local-only scratch / notes (never committed)
+_local/
