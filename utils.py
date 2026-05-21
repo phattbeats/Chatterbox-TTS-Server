@@ -205,10 +205,12 @@ VERSION_PATTERN = re.compile(
 # Pattern to find potential sentence endings (punctuation followed by quote/space/end of string).
 POTENTIAL_END_PATTERN = re.compile(r'([.!?])(["\']?)(\s+|$)')
 # Pattern to detect start-of-line bullet points or numbered lists.
+# Must be at column 0 (no leading indentation) so that indented dashes
+# in narrative text (e.g. "  ---TITLE---") are not falsely matched as bullets.
 # Requires a space/tab (not a newline) after the bullet char so that stray
-# dashes left over in narrative text (e.g. "-\n\nNext paragraph...") do
+# dashes at end-of-phrase (e.g. "wait that sounds lewd)-\n\nWithin...") do
 # not get treated as a single huge bullet item. See issue #144.
-BULLET_POINT_PATTERN = re.compile(r"(?:^|\n)[ \t]*([-•*]|\d+\.)[ \t]+")
+BULLET_POINT_PATTERN = re.compile(r"(?:^|\n)([-•*]|\d+\.)[ \t]+")
 # Placeholder for non-verbal cues or special instructions within text (e.g., (laughs), (sighs)).
 NON_VERBAL_CUE_PATTERN = re.compile(r"(\([\w\s'-]+\))")
 
@@ -949,8 +951,8 @@ def split_into_sentences(text: str) -> List[str]:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     bullet_point_matches = list(BULLET_POINT_PATTERN.finditer(text))
 
-    if bullet_point_matches:
-        logger.debug("Bullet points detected in text; splitting by bullet items.")
+    if len(bullet_point_matches) >= 2:
+        logger.debug("Bullet list detected (2+ items); splitting by bullet items.")
         processed_sentences: List[str] = []
         current_position = 0
         for i, bullet_match in enumerate(bullet_point_matches):
