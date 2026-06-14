@@ -1,15 +1,15 @@
 # requirements-rocm-windows.txt — AMD Windows fork
 # Windows ROCm support for AMD Radeon RX 6000 series (gfx1030/1031/1032)
 #
-# Install: pip install -r requirements-rocm-windows.txt
-# Then:    pip install --no-deps git+https://github.com/devnen/chatterbox-v2.git@master
-#
-# Uses wheels from https://wheels.phatt.vip/rocm-windows/simple/
-# See README.md for full install walkthrough.
+# NOTE: This file is a reference manifest only. The normal install path is
+#   python start.py --rocm-windows
+# which downloads the ROCm/torch wheels directly from the GitHub release
+# (tag v0.1.0-rocm-wheels) and installs them from local disk via
+# `pip install --no-index --find-links`. You do not need a pip index — these
+# wheels are NOT on PyPI and are gfx103X / Python 3.12 (cp312) only.
+# See README.md for the full install walkthrough.
 
---extra-index-url https://wheels.phatt.vip/rocm-windows/simple/
-
-# ROCm SDK meta-packages (7 wheels from guinmoon's rebuild)
+# ROCm SDK meta-packages (built from guinmoon's TheRock-based rebuild)
 rocm==7.1.1
 rocm-sdk-core==7.1.1
 rocm-sdk-devel==7.1.1

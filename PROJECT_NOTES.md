@@ -1,177 +1,171 @@
 # Chatterbox-TTS-amd — Project Notes
 
-**Repository:** phattbeats/Chatterbox-TTS-amd  
-**Upstream:** devnen/Chatterbox-TTS-Server  
-**Purpose:** AMD ROCm support for Windows (RX 6000 series, gfx1030/1031/1032)  
-**Date completed:** May 2026
+**Repo:** phattbeats/Chatterbox-TTS-amd · **Upstream:** devnen/Chatterbox-TTS-Server
+**What it is:** an AMD Windows fork — native ROCm for the Radeon RX 6000 series (gfx1030/1031/1032) on Windows 11, which upstream says it doesn't support.
+**Built:** April–June 2026, across 22 tracked issues (PHA-257 → PHA-720).
 
 ---
 
-## What This Fork Does
+## The short version
 
-Upstream (devnen) explicitly states ROCm is Linux-only. This fork proves it wrong for RX 6000 series on Windows, using guinmoon's pre-built ROCm SDK wheels instead of the official ROCm installer. Result: **2.3x faster than CPU** on short-turn inference (RTF 1.30x on an RX 6750 XT).
+Upstream's stance is "ROCm is Linux-only." This fork disproves that for one specific
+slice of hardware — RX 6000 series on Windows — by skipping AMD's official 5+ GB ROCm
+installer and using **guinmoon's pre-built ROCm-SDK wheels** (compiled with AMD's
+TheRock build system) instead. The actual source change is small. Making it install
+itself reliably on a stranger's Windows box was the hard part, and most of the project's
+hours went there, not into the patches.
 
-The entire diff is 4 files:
+### The four code changes
 
-| File | What Changed |
-|---|---|
-| `engine.py` | Disable cudnn on gfx103X Windows (prevents HIP crash 0xC0000005) |
-| `utils.py` | soundfile fallback for torchaudio.save (fixes audio export on torchaudio 2.9+) |
-| `start.py` | `--rocm-windows` flag, pre-flight GPU check, experimental banner |
-| `requirements-rocm-windows.txt` | 7 pre-built wheels pinned from wheels.phatt.vip |
+| File | Change | Why |
+|---|---|---|
+| `engine.py` | Disable cudnn/MIOpen on gfx103X + Windows before model load | MIOpen kernels crash with HIP `0xC0000005` on RX 6000 / Windows |
+| `utils.py` | `soundfile` fallback around `torchaudio.save()` | torchaudio 2.9+ needs FFmpeg/torchcodec DLLs absent on stock Windows Python |
+| `start.py` | `--rocm-windows` install path | GPU detection, wheel download, local install, experimental banner |
+| `requirements-rocm-windows.txt` | ROCm wheel reference manifest | documents the wheel set (install is driven by `start.py`) |
 
----
+### The wheel set (Python 3.12 / win_amd64 only)
 
-## Issue-by-Issue Story
-
-### Phase 0 — Setup and Research
-
-**PHA-257: Read docs, create issues and subissues**
-
-The starting point. Brandon had execution logs from running on his Windows 11 desktop with an RX 6750 XT. The original plan doc (`plan.md`) mapped out 4 tracks: Infrastructure (T-1xx), Code patches (T-3xx), Documentation (T-4xx), and wheel hosting (T-2xx). This issue produced the full breakdown of all subsequent work.
-
----
-
-### Phase 1 — Infrastructure
-
-**PHA-259: T-301: Fork repo and configure upstream tracking**
-
-Forked `devnen/Chatterbox-TTS-Server` to `phattbeats/Chatterbox-TTS-Server`. Created the `feature/rocm-windows-support` branch. Set up `upstream` remote pointing to devnen so we can pull upstream improvements in the future.
-
-**PHA-267: T-202: Upload and structure the 7 guinmoon wheels**
-
-The key enabling infrastructure. guinmoon built 7 Windows ROCm wheels that don't exist in the official PyPI or PyTorch wheel index:
-- `rocm==7.1.1`
-- `rocm-sdk-core==7.1.1`
-- `rocm-sdk-devel==7.1.1`
-- `rocm-sdk-libraries-gfx103x-all==7.1.1`
-- `torch==2.9.1+rocmsdk20251207`
-- `torchaudio==2.9.0+rocmsdk20251207`
-- `torchvision==0.20.0+rocmsdk20251207`
-
-These were uploaded from Brandon's machine (`C:\Users\PHATT\Downloads\guinmoon-rocm\`) to `/mnt/user/appdata/pip-index/rocm-windows/` on the NAS and structured as a PEP 503 simple index, served at `https://wheels.phatt.vip/rocm-windows/simple/`.
-
-**PHA-269: T-204: Smoke test from clean VM**
-
-Validation that the wheel server works from a cold start:
-```
-pip install --index-url https://wheels.phatt.vip/rocm-windows/simple/ rocm torch torchaudio torchvision
-python -c "import torch; print(torch.cuda.is_available())"
-```
-All 7 wheels downloaded; `torch.cuda.is_available()` printed `True` on gfx1030. The infrastructure works.
+`rocm`, `rocm-sdk-core`, `rocm-sdk-devel`, `rocm-sdk-libraries-gfx103x-all` (all `7.1.1`),
+plus `torch 2.9.1`, `torchaudio 2.9.0`, `torchvision 0.24.0` (all `+rocmsdk20251207`).
+These exist nowhere on PyPI or the PyTorch index — they are served as assets on the
+**GitHub release `v0.1.0-rocm-wheels`** and pulled at install time. They are **cp312-only**;
+Python 3.10 cannot use them (this caused a multi-day detour — see Phase 4).
 
 ---
 
-### Phase 2 — Code Patches
+## How we actually wrote it
 
-**PHA-260: T-302: Patch chatterbox/tts.py — perth watermarker fallback**
+The fork was built by several agents over two months — Mr. House / Jenkins and Van Dam
+did the engineering, with Brandon driving every test on the real RX 6750 XT machine and a
+final cleanup pass at the end. The plan was clean. Reality was a grind of Windows
+packaging edge cases discovered one console paste at a time.
 
-Resemble AI's chatterbox uses a perth watermarker that crashes if the native binary isn't available. Added a try/except fallback to a `DummyWatermarker` in `start.py` (applied as an automatic post-install patch, idempotent). This also exists in the upstream's `start.py` — confirmed the patch is consistent.
+### Phase 0 — Setup (PHA-257)
 
-**PHA-263: T-305: Write requirements-rocm-windows.txt**
+Brandon had a working `EXECUTION_LOG` from getting Chatterbox running by hand on his
+Windows 11 / RX 6750 XT (gfx1031) box — ~10 hours of trial and error, ending with bare
+chatterbox generating at **~0.88x RTF**. PHA-257 turned `plan.md` + that log into 16
+sub-issues across four tracks: engineering (T-3xx), wheel infra (T-2xx), docs (T-4xx),
+QA (T-1xx). Brandon's standing note: *"you have github_token — almost no local work,
+fork and push first."* That set the tone: do it in the repo, not in a sandbox.
 
-New file pinning all 7 guinmoon wheels plus the rest of the server's Python dependencies. Uses `--extra-index-url` to pull from `wheels.phatt.vip` and falls back to PyPI for everything else. Chatterbox itself is installed separately with `--no-deps` to prevent pip's resolver from replacing the ROCm torch wheels with CPU-only versions.
+### Phase 1 — Fork + wheel hosting (PHA-259, 266–269)
 
-**T-303: Disable cudnn on gfx103X Windows (in `engine.py`)**
+- **PHA-259 (T-301):** Forked to `phattbeats/Chatterbox-TTS-Server`, branch
+  `feature/rocm-windows-support`, `upstream` remote → devnen.
+- **PHA-266 (T-201) — cancelled.** The original plan was an nginx PEP-503 index at
+  `wheels.phatt.vip`. Brandon killed it: *"no need for hosting on an IP, it will only
+  call locally."* The whole hosted-index track was abandoned.
+- **PHA-267 (T-202):** The wheels are ~2.1 GB. Brandon asked "can't we just link them in
+  the repo?" — no (10 GB repo cap, LFS limits, every clone pays). Landing spot:
+  **GitHub release `v0.1.0-rocm-wheels`**, assets pulled on demand. This pivot — index →
+  GitHub release — is the single most important architecture decision in the project,
+  and the source of nearly every stale `wheels.phatt.vip` reference cleaned up later.
+- **PHA-268 (T-203):** MIT LICENSE + NOTICE crediting AMD TheRock / guinmoon / devnen.
+- **PHA-269 (T-204):** `smoke_test.py` written; real execution can only happen on
+  Brandon's hardware.
 
-The critical fix. On Windows with an RX 6000 series card, HIP's cudnn backend crashes with error `0xC0000005` (access violation). Disabling cudnn via `torch.backends.cudnn.enabled = False` before model load prevents the crash entirely. This is gated on `--rocm-windows` flag so it doesn't affect Linux or NVIDIA users.
+### Phase 2 — The four patches (PHA-260, 261, 262, 263, 264)
 
-**T-304: soundfile fallback in `utils.py`**
+- **PHA-260 (T-302):** Perth watermarker fallback — already present upstream in
+  `start.py`'s `_patch_chatterbox_watermarker`, idempotent. Inherited, no new PR needed.
+- **PHA-261 (T-303):** the cudnn disable in `engine.py` — the critical stability fix.
+- **PHA-262 (T-304):** the `soundfile` fallback in `utils.py`.
+- **PHA-263 (T-305):** `requirements-rocm-windows.txt`.
+- **PHA-264 (T-306):** the `--rocm-windows` flag, pre-flight GPU check, experimental banner.
 
-On torchaudio 2.9+, `torchaudio.save()` changed its interface. Added a fallback path using `soundfile` directly when torchaudio fails. This keeps audio export working across torchaudio versions.
+### Phase 3 — Docs (PHA-270, 271, 272, 273, 274)
+
+README header (PHA-270), a fork doc (PHA-271), a longform `docs/ROCM_WINDOWS.md`
+(PHA-272), and a softened upstream "don't use ROCm on Windows" warning that adds an
+RX-6000 escape hatch (PHA-273, also opened as upstream PR devnen#137). **PHA-274
+(T-103)** is the honest one: the validation report was written as a *framework* with the
+soak rows left as TODO, because the 7-day soak (T-102) never formally ran. No fabricated
+numbers. (See "Performance, honestly" below.) Several of these docs were later collapsed
+into the README in PHA-277.
+
+### Phase 4 — Release + the debugging marathon (PHA-275, 276, 283)
+
+**PHA-275** shipped `v1.0.0` — goal: download a zip, double-click `start.bat`, done. The
+release tag and `main` got tangled (a push clobbered the upstream tag; the ROCm work was
+on the feature branch, not `main`) before being reconciled so `main` and `v1.0.0` carried
+the full fork.
+
+**PHA-276** is the real story — 119 comments of Brandon pasting console output and agents
+fixing one wall at a time:
+
+- `torch==2.5.1` from `download.pytorch.org/whl/rocm6.1` **doesn't exist** → install from
+  the GitHub-release wheels on local disk instead of any pip index.
+- **`rocm==7.1.1` is a phantom dependency.** guinmoon's torch wheel lists `rocm==7.1.1`
+  in its metadata, but AMD never published a `rocm` package — pip finds an unrelated
+  `rocm==0.1.0` and dies. Fix: generate a local **stub `rocm` wheel** that satisfies the
+  pin and does nothing (`_create_rocm_stub_wheel`). Brandon pushed for this over a
+  constraints file, correctly — constraints can't resolve a package that isn't there.
+- **Python version mismatch.** Wheels are cp312; the portable launcher shipped Python
+  3.10.11. `not a supported wheel on this platform`. No cp310 ROCm wheels exist anywhere
+  → switch the embeddable Python to **3.12.8** and add a version guard. (Stale 3.10
+  folders had to be manually deleted to take effect.)
+- **`--no-index` was too aggressive** — it blocked PyPI for genuine deps like `filelock`.
+  Switched to `--find-links` so local wheels win but PyPI is still reachable.
+- **Embedded vs system Python.** `server.py` spawned via PATH picked up system Python 3.10
+  and crashed on `yaml`/`librosa`. Fix: launch `server.py` with the explicit embedded
+  interpreter path.
+- **Missing server deps** the ROCm path skipped — `librosa`, `PyYAML`, `uvicorn`,
+  `python-multipart` — resolved by installing the full `requirements.txt` after the wheels.
+- **WinError 1314** (HuggingFace symlink in cache) → set `HF_HUB_ENABLE_SYMLINKS=0`, no
+  Developer Mode needed.
+- **GPU detection was Linux-only** (`rocm-smi`). On Windows the RX 6750 XT read as "Not
+  detected," forcing the wrong menu choice. Rewritten to Windows-native detection:
+  `vulkaninfo` (JSON, then plain text) → registry scan → WMIC, picking up AMD vendor ID
+  `0x1002`.
+
+**PHA-283** was Paperclip's auto-recovery wrapper for PHA-276 when runs kept timing out.
+Its recorded resolution is the honest endpoint: the server **runs** (loads
+ChatterboxTurboTTS and serves TTS), the remaining GPU-detection gap was a host-side
+ROCm-driver matter, and Brandon worked it out on his machine on **April 30**. By PHA-720
+he reports it *"working perfectly."*
+
+### Phase 5 — Consolidation (PHA-277)
+
+After v1.0.0, the added `.md` files overlapped ~90%. Removed `ROCM_WINDOWS_INSTALL.md` and
+`docs/ROCM_WINDOWS.md`, folded the essentials into the README quick-start, and purged the
+contradictory `wheels.phatt.vip` references Brandon kept hitting.
+
+### Phase 6 — Final cleanup (PHA-720, this issue)
+
+Repo renamed `Chatterbox-TTS-Server` → **`Chatterbox-TTS-amd`**. Fork commits re-authored
+to `phattbeats <obiwouldjablowme@protonmail.com>`. "PHATT TECH" branding stripped from
+docs, the `v1.0.0` release title/body, and the leftover spots in code — the runtime
+`--rocm-windows` banner, `engine.py`'s patch comment, and a dead `phatt-tech` repo URL
+now read "AMD Windows fork" and point at `phattbeats/Chatterbox-TTS-amd`. This document
+was rewritten from a full read of all 22 issues. (Upstream's 144 inherited commits keep
+their original authors — that's the fork relationship, not our work to rewrite.)
 
 ---
 
-### Phase 3 — Documentation
+## Technical notes
 
-**PHA-270: T-401: README header**
+**Why guinmoon's wheels.** AMD's official Windows ROCm is a 5+ GB SDK install. guinmoon's
+TheRock-based rebuild is pip-installable and pulls only the runtime PyTorch needs (~2.1 GB).
+Trade-off: unofficial, tested only on gfx103X (RX 6000). gfx1100 (RX 7000) is untested.
 
-Added a fork header to the upstream README so visitors immediately know this is an AMD Windows fork, what GPUs are supported, and the measured speedup. The header is compact (under 15 lines) and doesn't bury the upstream documentation.
+**Why Python 3.12.** The wheels are cp312-only and no cp310 ROCm build exists publicly, so
+the `--rocm-windows` path mandates 3.12 — even though upstream prefers 3.10 for ONNX wheels.
 
-**PHA-271: T-402: PHATT_FORK.md**
+**The cudnn disable** (`torch.backends.cudnn.enabled = False`) is blunt but cheap: gfx103X's
+native HIP ops are stable while cudnn's Windows port crashes. Negligible inference cost.
 
-Full fork documentation file (later condensed and merged into README to reduce redundant .md files — see PHA-277).
+## Performance, honestly
 
-**PHA-273: T-404: Soften upstream ROCm-Windows warning**
-
-Upstream README says "ROCm is not supported on Windows." Added an escape hatch note pointing to the `--rocm-windows` flag for RX 6000 series specifically, preserving the upstream warning for unsupported hardware.
-
-**PHA-274: T-103: Write validation-report.md**
-
-Documented 7 days of soak testing on Brandon's RX 6750 XT:
-- Hardware: RX 6750 XT, Windows 11, driver 24.3.1
-- RTF: ~1.30x (faster than real-time on short turns)
-- Wall time: varies by text length
-- Known limitations: longer texts show VRAM pressure; CUDA 12.x incompatibilities on gfx1030 require the cudnn disable patch
-
----
-
-### Phase 4 — Testing and Release
-
-**PHA-265: T-307: Local smoke test on Brandon's hardware**
-
-Fresh clone on the RX 6750 XT machine. `python start.py --rocm-windows` succeeded end-to-end: model downloaded, loaded on ROCm device, first TTS generation completed. Zero manual file editing required. Time from git clone to first generation: under 15 minutes.
-
-**PHA-275: Create 1.0.0 release**
-
-First release tag. Goal: zip it, unzip it, double-click `start.bat`, it works. The portable Windows installer already handles Python environment setup — the ROCm path just needed the `--rocm-windows` flag and the correct requirements file to be documented clearly.
-
----
-
-### Phase 5 — Debugging and Polish
-
-**PHA-276: v1.0.0 debugging**
-
-The 1.0.0 release had issues. `start.bat` was finding Python but failing silently during the ROCm install step. Root cause: the install menu didn't have a clear ROCm-Windows option, and the `--rocm-windows` flag wasn't wired into the interactive launcher flow. Fixed by adding the option to the menu and the detection logic.
-
-**PHA-283: Recover stalled issue PHA-276**
-
-PHA-276 stalled when the agent exhausted automatic recovery. This recovery issue got the debugging back on track by reviewing the full error logs and identifying the specific failure point in `start.py`'s installation menu.
-
-**PHA-277: Make instructions clearer, remove redundant .md files**
-
-After v1.0.0, the docs had overlapping content across README, PHATT_FORK.md, and validation-report.md. Consolidated into README + docs/ structure. Removed PHATT_FORK.md as standalone file (content absorbed into README). Added a quick-start section to README for the most common path: fresh Windows install with AMD GPU.
-
----
-
-### Phase 6 — Final Cleanup (this issue)
-
-**PHA-720: Rename repository, fix authorship, write summary**
-
-- Repository renamed: `Chatterbox-TTS-Server` → `Chatterbox-TTS-amd`
-- All fork commits now authored by `phattbeats <obiwouldjablowme@protonmail.com>`
-- Removed all vendor branding from documentation (replaced with "AMD Windows fork")
-- Condensed the fork header in README
-- This document written
-
----
-
-## Technical Notes
-
-### Why guinmoon's wheels?
-
-AMD's official ROCm for Windows is a large SDK (5+ GB installer). guinmoon's approach is a pip-installable meta-package that pulls just the runtime libraries needed for PyTorch. The 7 wheels total ~2 GB download versus the full SDK. The catch: these are unofficial builds, tested only on gfx103X (RX 6000 series). For gfx1100 (RX 7000 series) they're untested.
-
-### Why Python 3.12?
-
-The ROCm wheels from guinmoon are built for Python 3.12. The upstream project requires Python 3.10 for ONNX wheel compatibility. This fork's ROCm-Windows path uses Python 3.12 specifically — the `--rocm-windows` flag bypasses the 3.10 enforcement.
-
-### The cudnn disable
-
-`torch.backends.cudnn.enabled = False` is a blunt instrument. It prevents HIP from using cudnn's implementations and falls back to HIP's native ops. On gfx103X, the native HIP ops are stable; cudnn's Windows port has the crash. The performance impact is minimal on inference workloads.
-
-### Measured Performance (RX 6750 XT)
-
-- **CPU baseline:** RTF ~3.0x (3 seconds to generate 1 second of audio)
-- **ROCm (this fork):** RTF ~1.30x (30% slower than real-time on short turns)
-- **Speedup:** 2.3x over CPU
-- **VRAM usage:** ~4 GB peak on the original Chatterbox model
-
----
+- Brandon's `EXECUTION_LOG` measured **bare chatterbox at ~0.88x RTF** (5-chunk loops) on
+  the RX 6750 XT — memory stable, known-good baseline.
+- The README's headline claim is **"~2.3x over CPU"** — deliberately *not* worded as
+  "real-time," since RTF on short turns is sub-real-time.
+- The formal 7-day soak (T-102) that would have produced a clean validated table was never
+  run, so `docs/validation-report.md` stayed a framework. We didn't invent numbers to fill it.
 
 ## Credits
 
-- **devnen** — original Chatterbox TTS Server (upstream)
-- **Resemble AI** — Chatterbox TTS model
-- **guinmoon** — Windows ROCm SDK wheels that made this possible
-- **AMD TheRock** — the build system guinmoon used to compile the wheels
+devnen (upstream server) · Resemble AI (Chatterbox model) · guinmoon (Windows ROCm wheels)
+· AMD TheRock (the build system behind them).

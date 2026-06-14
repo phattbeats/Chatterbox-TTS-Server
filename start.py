@@ -1544,7 +1544,7 @@ def perform_installation(venv_pip, install_type, root_dir):
         return False
 
     # ROCm requires a two-step install: ROCm PyTorch wheels first, then deps
-    # (rocm-windows uses pre-built wheels from phatt.vip, no init file needed)
+    # (rocm-windows downloads pre-built wheels from the GitHub release, no init file needed)
     if install_type in (INSTALL_ROCM, INSTALL_ROCM_WINDOWS):
         rocm_init_path = root_dir / REQUIREMENTS_ROCM_INIT
         if not rocm_init_path.exists():
@@ -2634,9 +2634,9 @@ def main():
         # rocm-windows: print experimental warning
         if install_type == INSTALL_ROCM_WINDOWS:
             print_warning("=" * 60)
-            print_warning("  ⚡ PHATT TECH FORK — EXPERIMENTAL ROCm FOR WINDOWS")
+            print_warning("  ⚡ AMD WINDOWS FORK — EXPERIMENTAL ROCm FOR WINDOWS")
             print_warning("  This is not officially supported by devnen. Use at your own risk.")
-            print_warning("  For issues, open a ticket at github.com/phatt-tech/Chatterbox-TTS-Server")
+            print_warning("  For issues, open a ticket at github.com/phattbeats/Chatterbox-TTS-amd")
             print_warning("=" * 60)
             print()
 

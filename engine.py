@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import platform
 
-# ── Phatt Tech: disable cudnn/MIOpen on gfx103X Windows ──────────────────────
+# ── AMD Windows fork: disable cudnn/MIOpen on gfx103X Windows ─────────────────
 # MIOpen convolution kernels crash with HIP error 0xC0000005 on AMD RX 6000
 # series (gfx1030/1031/1032) under Windows ROCm. Disable cudnn when a gfx103X
 # AMD GPU is detected to prevent sporadic crashes during generation.
