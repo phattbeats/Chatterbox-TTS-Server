@@ -3,6 +3,17 @@
 **Repo:** phattbeats/Chatterbox-TTS-amd · **Upstream:** devnen/Chatterbox-TTS-Server
 **What it is:** an AMD Windows fork — native ROCm for the Radeon RX 6000 series (gfx1030/1031/1032) on Windows 11, which upstream says it doesn't support.
 **Built:** April–June 2026, across 22 tracked issues (PHA-257 → PHA-720).
+**Last upstream sync:** July 6, 2026 (PHA-1319) — includes a **security fix**. See
+[Phase 7](#phase-7--post-completion-upstream-sync-pha-1319-july-6-2026) before running an
+older build.
+
+> ⚠️ **If you are running a build from before July 6, 2026, update.** Commits prior to
+> `2424a04` are affected by a path-traversal vulnerability (CWE-22) in `/tts` and
+> `/v1/audio/speech`. Details in Phase 7.
+
+**Companion doc:** [`CHAT_NARRATIVE.md`](CHAT_NARRATIVE.md) — the pre-board discovery arc
+(April 19, before PHA-257 existed) and the April 30 reboot-night debugging story, neither of
+which is captured below.
 
 ---
 
@@ -141,6 +152,41 @@ docs, the `v1.0.0` release title/body, and the leftover spots in code — the ru
 now read "AMD Windows fork" and point at `phattbeats/Chatterbox-TTS-amd`. This document
 was rewritten from a full read of all 22 issues. (Upstream's 144 inherited commits keep
 their original authors — that's the fork relationship, not our work to rewrite.)
+
+### Phase 7 — Post-completion: upstream sync (PHA-1319, July 6, 2026)
+
+Three weeks after the project closed, a fresh review issue asked a simple question — could
+the fork be improved? The answer turned out to be operational, not cosmetic: upstream
+`devnen/Chatterbox-TTS-Server` had landed **14 commits since the fork point**, one of them a
+security fix for a vulnerability this fork was live with.
+
+**The security fix — path traversal (CWE-22).** `/tts` and `/v1/audio/speech` passed
+user-supplied `predefined_voice_id`, `reference_audio_filename`, and OpenAI-style `voice`
+values straight into a path join against the voices / reference-audio directories. A `../`
+sequence escaped the directory, so a caller could point the server at arbitrary files on
+disk. Anyone who exposed the server beyond localhost was exposed with it.
+
+Fixed by `utils.safe_resolve_within(base_dir, filename)` — strips the filename to its
+basename, resolves it, and asserts the result is still inside `base_dir`, raising otherwise.
+All three call sites in `server.py` now wrap the join and return **HTTP 400** on a traversal
+attempt instead of reading the file.
+
+Four commits were cherry-picked from upstream and pushed to `main` on July 6 (author
+attribution preserved — these are upstream's fixes, not ours):
+
+| Commit | What |
+|---|---|
+| `2424a04` | **Path traversal fix (CWE-22)** in `/tts` + `/v1/audio/speech` — the security one |
+| `af6fb93` | Chunker no longer treats stray dashes as bullet points (upstream #144) |
+| `30ffb49` | Chunking false positives on narrative dashes (upstream #144) |
+| `205481c` | `language` parameter support in the OpenAI-compatible speech endpoint (upstream #149) |
+
+None of these touch the ROCm patches — `engine.py`'s cudnn disable, `utils.py`'s `soundfile`
+fallback, and the `start.py` install path are unchanged and unaffected. The `v1.0.0` release
+tag predates all four; run `main` at `205481c` or later.
+
+*This section was added Aug 2026 (PHA-1685). The doc had sat at its June 13 state and carried
+no record that the vulnerability ever existed or that it's closed.*
 
 ---
 
